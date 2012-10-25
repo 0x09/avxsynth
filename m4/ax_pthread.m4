@@ -158,10 +158,6 @@ case ${host_os} in
 
         ax_pthread_flags="-pthreads pthread -mt -pthread $ax_pthread_flags"
         ;;
-
-        darwin*)
-        ax_pthread_flags="-pthread $ax_pthread_flags"
-        ;;
 esac
 
 if test x"$ax_pthread_ok" = xno; then
