@@ -680,7 +680,7 @@ PVideoFrame FilterInfo::GetFrame(int n, IScriptEnvironment* env)
 		"Audio Channels: %-8u\n"                              //  25
 		"Sample Type: %s\n"                                   //  28=14+14
 		"Samples Per Second: %5d\n"                           //  26
-		"Audio length: %ld samples. %02d:%02d:%02d:%03d\n"  //  57=37+20
+		"Audio length: %lld samples. %02d:%02d:%02d:%03d\n"  //  57=37+20
 		, viIn.AudioChannels()
 		, s_type
 		, viIn.audio_samples_per_second
