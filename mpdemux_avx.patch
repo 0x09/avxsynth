@@ -1,5 +1,5 @@
 diff --git Makefile Makefile
-index d1ce8dd..995a52c 100644
+index d1ce8dd..ef83814 100644
 --- Makefile
 +++ Makefile
 @@ -213,6 +213,7 @@ SRCS_COMMON-$(WIN32DLL)              += libmpcodecs/ad_acm.c \
@@ -11,7 +11,7 @@ index d1ce8dd..995a52c 100644
                av_log.c \
                av_opts.c \
 diff --git configure configure
-index 18bc404..c75d913 100755
+index 18bc404..269018f 100755
 --- configure
 +++ configure
 @@ -363,6 +363,7 @@ Optional features:
@@ -41,7 +41,16 @@ index 18bc404..c75d913 100755
    --enable-lirc)        _lirc=yes       ;;
    --disable-lirc)       _lirc=no        ;;
    --enable-lircc)       _lircc=yes      ;;
-@@ -5630,6 +5636,21 @@ else
+@@ -3778,7 +3782,7 @@ if test "$quicktime" = auto ; then
+   statement_check QuickTime/QuickTime.h 'ImageDescription *desc; EnterMovies(); ExitMovies()' -framework QuickTime && quicktime=yes
+ fi
+ if test "$quicktime" = yes ; then
+-  extra_ldflags="$extra_ldflags -framework QuickTime"
++  extra_ldflags="$extra_ldflags -framework QuickTime -framework Carbon"
+   def_quicktime='#define CONFIG_QUICKTIME 1'
+ else
+   def_quicktime='#undef CONFIG_QUICKTIME'
+@@ -5630,6 +5634,21 @@ else
  fi
  echores "$_live"
  
@@ -63,7 +72,7 @@ index 18bc404..c75d913 100755
  
  
  # Test with > against Libav 0.8 versions which will NOT work rather than
-@@ -6405,6 +6426,7 @@ XV = $_xv
+@@ -6405,6 +6424,7 @@ XV = $_xv
  XVID4 = $_xvid
  XVR100 = $_xvr100
  YUV4MPEG = $_yuv4mpeg
@@ -71,7 +80,7 @@ index 18bc404..c75d913 100755
  
  # FFmpeg
  FFMPEG_INTERNALS = $ffmpeg_internals
-@@ -6612,6 +6634,7 @@ $def_zlib
+@@ -6612,6 +6632,7 @@ $def_zlib
  $def_libpostproc
  $def_libnut
  
@@ -79,9 +88,24 @@ index 18bc404..c75d913 100755
  
  /* binary codecs */
  $def_qtx
+diff --git libmpcodecs/vf_lavc.c libmpcodecs/vf_lavc.c
+index b2c1dd7..8a49422 100644
+--- libmpcodecs/vf_lavc.c
++++ libmpcodecs/vf_lavc.c
+@@ -76,8 +76,8 @@ static int config(struct vf_instance *vf,
+ 	return 0;
+     }
+ 
+-    if (lavc_venc_context.codec->encode == NULL) {
+-	mp_msg(MSGT_VFILTER,MSGL_ERR,"avcodec init failed (ctx->codec->encode == NULL)!\n");
++    if (lavc_venc_context.codec->encode2 == NULL) {
++	mp_msg(MSGT_VFILTER,MSGL_ERR,"avcodec init failed (ctx->codec->encode2 == NULL)!\n");
+ 	return 0;
+     }
+ 
 diff --git libmpdemux/demux_avx.c libmpdemux/demux_avx.c
 new file mode 100644
-index 0000000..de5a1b6
+index 0000000..1f09ed6
 --- /dev/null
 +++ libmpdemux/demux_avx.c
 @@ -0,0 +1,410 @@
