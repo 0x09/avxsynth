@@ -89,7 +89,7 @@ private:
 	
 private:
 	AvxLog();
-	const char* DetermineLoggingFolderPath();
+	void ReadConfig();
 
 private:
 	static char 		m_varArgsBuffer[1 + MAX_VARARGS_LEN];

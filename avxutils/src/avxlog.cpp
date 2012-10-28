@@ -47,6 +47,7 @@ namespace avxsynth
 AvxLog* AvxLog::g_pLoggingServices = NULL;
 char 	AvxLog::m_varArgsBuffer[1 + MAX_VARARGS_LEN];
 bool    AvxLog::g_bLoggingEnabled = true;
+const static log4cpp::Priority::Value g_logLevelDefault = log4cpp::Priority::INFO;
 
 void AvxLog::Debug(const char* pStrModule, const char* pStrFormat, ...)
 {
@@ -205,7 +206,7 @@ void AvxLog::Fatal(const char* pStrModule, const char* pStrFormat, ...)
 	g_pLoggingServices->m_category.fatal(AvxLog::m_varArgsBuffer);
 }	
 	
-const char* AvxLog::DetermineLoggingFolderPath(void)
+void AvxLog::ReadConfig(void)
 {
     //
     // The default location for log files is $HOME/.avxsynth/logs
@@ -214,12 +215,14 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
     if(NULL == pStrHomeFolderPath)
     {
         fprintf(stderr, "Failed retrieving the value of $HOME env variable\n");
-        return NULL;
+        return;
     }
     
     std::string strAvxSynthFolder   = std::string(pStrHomeFolderPath) + std::string("/.avxsynth");
     std::string strLoggingConfFile  = strAvxSynthFolder + std::string("/avxsynthlog.conf");
     std::string strDefaultLogPath   = strAvxSynthFolder + std::string("/log");
+    std::string strLogPath;
+    std::string strLogLevel;
     
     struct stat st;
     bool bAvxSynthFolderExists      = (0 == stat(strAvxSynthFolder.c_str(), &st));
@@ -238,7 +241,7 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
             if(NULL == fp)
             {
                 fprintf(stderr, "Failed opening %s for reading\n", strLoggingConfFile.c_str());
-                return NULL;
+                return;
             }
             
             std::string strSpecifiedLogPath;
@@ -256,7 +259,14 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
                     size_t nNewlinePos = strSpecifiedLogPath.find("\n");
                     if(std::string::npos != nNewlinePos)
                         strSpecifiedLogPath.replace(nNewlinePos, 1, "");
-                    break;
+                }
+                else if(strLine == strstr(strLine,"LOG_LEVEL="))
+                {
+                    strLogLevel = strLine;
+                    strLogLevel.replace(0, strlen("LOG_LEVEL="), "");
+                    size_t nNewlinePos = strLogLevel.find("\n");
+                    if(std::string::npos != nNewlinePos)
+                        strLogLevel.replace(nNewlinePos, 1, "");
                 }
             }
             fclose(fp);
@@ -265,21 +275,17 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
             if(strSpecifiedLogPath.empty())
             {
                 fprintf(stderr, "No valid avxsynth log path found in %s\n", strLoggingConfFile.c_str());
-                return NULL;
             }
             else
             {
                 bool bSpecifiedLogPathExists = (0 == stat(strSpecifiedLogPath.c_str(), &st));
-                if(false == bSpecifiedLogPathExists)
+                if(false == bSpecifiedLogPathExists && mkdir(strSpecifiedLogPath.c_str(), 0777))
                 {
-                    if(mkdir(strSpecifiedLogPath.c_str(), 0777))
-                    {
-                        fprintf(stderr, "Failed creating non-existing folder %s (specified in %s)\n", 
-                                            strSpecifiedLogPath.c_str(), strLoggingConfFile.c_str());
-                        return NULL;
-                    }
+                    fprintf(stderr, "Failed creating non-existing folder %s (specified in %s)\n",
+                                        strSpecifiedLogPath.c_str(), strLoggingConfFile.c_str());
                 }
-                return strSpecifiedLogPath.c_str();
+                else
+                    strLogPath = strSpecifiedLogPath;
             }
         }
         else
@@ -291,7 +297,7 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
             if(NULL == fp)
             {
                 fprintf(stderr, "Failed creating non-existent %s\n", strLoggingConfFile.c_str());
-                return NULL;
+                return;
             }
             
             if(false == bDefaultLogFolderExists)
@@ -301,14 +307,23 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
                     fclose(fp);
                     fp = NULL;
                     fprintf(stderr, "Failed creating non-existent default log folder %s\n", strDefaultLogPath.c_str());
-                    return NULL;
+                    return;
                 }
             }
             fprintf(fp, "# Syntax: LOG_PATH=<log folder path> // do not use double quotes\n");
             fprintf(fp, "LOG_PATH=%s\n", strDefaultLogPath.c_str());
+            fprintf(fp,"\n");
+            fprintf(fp, "# Logging threshold, options: ");
+
+			log4cpp::Priority::Value i;
+			for(i = log4cpp::Priority::FATAL; i < log4cpp::Priority::DEBUG; i += 100)
+				fprintf(fp, "%s%s, ", log4cpp::Priority::getPriorityName(i).c_str(), (i == g_logLevelDefault ? " (default)" : "") );
+			fprintf(fp, "%s%s\n", log4cpp::Priority::getPriorityName(i).c_str(), (i == g_logLevelDefault ? " (default)" : "") );
+
+			fprintf(fp, "LOG_LEVEL=%s\n",log4cpp::Priority::getPriorityName(g_logLevelDefault).c_str());
             fclose(fp);
             fp = NULL;
-            return strDefaultLogPath.c_str();
+            strLogPath = strDefaultLogPath;
         }
     }
     else
@@ -319,26 +334,67 @@ const char* AvxLog::DetermineLoggingFolderPath(void)
         if(mkdir(strAvxSynthFolder.c_str(), 0777))
         {
             fprintf(stderr, "Failed creating non-existent %s folder\n", strAvxSynthFolder.c_str());
-            return NULL;
+            return;
         }
         if(mkdir(strDefaultLogPath.c_str(), 0777))
         {
             fprintf(stderr, "Failed creating non-existent default logging folder %s\n", strDefaultLogPath.c_str());
-            return NULL;
+            return;
         }
         FILE* fp = fopen(strLoggingConfFile.c_str(), "w");
         if(NULL == fp)
         {
             fprintf(stderr, "Failed creating non-existent %s file\n", strLoggingConfFile.c_str());
-            return NULL;
+            return;
         }
         fprintf(fp, "# Syntax: LOG_PATH=<log folder path> // do not use double quotes\n");
         fprintf(fp, "LOG_PATH=%s\n", strDefaultLogPath.c_str());
+		fprintf(fp, "\n");
+        fprintf(fp, "# Logging threshold, options: ");
+
+		log4cpp::Priority::Value i;
+		for(i = log4cpp::Priority::FATAL; i < log4cpp::Priority::DEBUG; i += 100)
+			fprintf(fp, "%s%s, ", log4cpp::Priority::getPriorityName(i).c_str(), (i == g_logLevelDefault ? " (default)" : "") );
+		fprintf(fp, "%s%s\n", log4cpp::Priority::getPriorityName(i).c_str(), (i == g_logLevelDefault ? " (default)" : "") );
+
+		fprintf(fp, "LOG_LEVEL=%s\n",log4cpp::Priority::getPriorityName(g_logLevelDefault).c_str());
         fclose(fp);
         fp = NULL;
-        return strDefaultLogPath.c_str();
+        strLogPath = strDefaultLogPath.c_str();
     }
-    return NULL;
+	
+    if(!strLogPath.empty())
+    {
+	    if(m_pOstream && (&std::cerr != m_pOstream))
+	    {
+	        m_fb.close();
+	        delete m_pOstream;
+	    }
+	    m_category.removeAllAppenders();
+
+        char strLogFilename[PATH_MAX];
+        memset(strLogFilename, 0, PATH_MAX*sizeof(char));
+        
+        pid_t currentPID = getpid();
+        
+        sprintf(strLogFilename, "%s/logAvxsynth_pid_%08d.txt", strLogPath.c_str(), currentPID);
+        m_fb.open(strLogFilename, std::ios::out);
+        m_pOstream = new std::ostream(&m_fb);
+		m_pAppender = new log4cpp::OstreamAppender("OstreamAppender", m_pOstream);
+		m_pLayout   = new log4cpp::SimpleLayout();
+		m_pAppender->setLayout(m_pLayout);
+		m_category.setAppender(m_pAppender);
+    }
+	
+	if(!strLogLevel.empty())
+	{
+		try {
+			m_category.setPriority(log4cpp::Priority::getPriorityValue(strLogLevel));
+		}
+		catch(std::invalid_argument) {
+			fprintf(stderr,"Invalid loglevel \"%s\" found in %s.\n", strLogLevel.c_str(), strLoggingConfFile.c_str());
+		}
+	}
 }
 
 AvxLog::AvxLog()
@@ -347,27 +403,17 @@ AvxLog::AvxLog()
 	, m_pLayout(NULL)
 	, m_category(log4cpp::Category::getInstance("Category"))
 {
-    const char* pStrLogFolder = DetermineLoggingFolderPath();
-    if(pStrLogFolder)
-    {
-        char strLogFilename[PATH_MAX];
-        memset(strLogFilename, 0, PATH_MAX*sizeof(char));
-        
-        pid_t currentPID = getpid();
-        
-        sprintf(strLogFilename, "%s/logAvxsynth_pid_%08d.txt", pStrLogFolder, currentPID);
-        m_fb.open(strLogFilename, std::ios::out);
-        m_pOstream = new std::ostream(&m_fb);
-    }
-    else
-        m_pOstream = &std::cerr;
+    // Defaults
+    m_pOstream = &std::cerr;
     
 	m_pAppender = new log4cpp::OstreamAppender("OstreamAppender", m_pOstream);
 	m_pLayout   = new log4cpp::SimpleLayout();
 
 	m_pAppender->setLayout(m_pLayout);
 	m_category.setAppender(m_pAppender);
-    m_category.setPriority(log4cpp::Priority::INFO);
+    m_category.setPriority(g_logLevelDefault);
+	
+	ReadConfig();
 };
 
 AvxLog::~AvxLog()
