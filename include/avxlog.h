@@ -85,6 +85,7 @@ public:
     
 private:	
 	static AvxLog* g_pLoggingServices;
+	static bool    g_bLoggingEnabled;
 	
 private:
 	AvxLog();

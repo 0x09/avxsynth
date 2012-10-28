@@ -44,8 +44,9 @@
 namespace avxsynth
 {
     
-AvxLog* AvxLog::g_pLoggingServices = new AvxLog();
+AvxLog* AvxLog::g_pLoggingServices = NULL;
 char 	AvxLog::m_varArgsBuffer[1 + MAX_VARARGS_LEN];
+bool    AvxLog::g_bLoggingEnabled = true;
 
 void AvxLog::Debug(const char* pStrModule, const char* pStrFormat, ...)
 {
@@ -54,8 +55,10 @@ void AvxLog::Debug(const char* pStrModule, const char* pStrFormat, ...)
 	// the default compiler flags option as returned by `log4cpp-config --cflags`
 	// has the -DNDEBUG set, which effectively blocks Debug messages. 
 	//
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 		
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Debug,Message=", pStrModule);
@@ -71,8 +74,10 @@ void AvxLog::Debug(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Info(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 		
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Info,Message=", pStrModule);
@@ -88,8 +93,10 @@ void AvxLog::Info(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Notice(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 		
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Notice,Message=", pStrModule);
@@ -105,8 +112,10 @@ void AvxLog::Notice(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Warn(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 	
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Warn,Message=", pStrModule);
@@ -122,8 +131,10 @@ void AvxLog::Warn(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Error(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 	
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Error,Message=", pStrModule);
@@ -139,8 +150,10 @@ void AvxLog::Error(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Crit(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 		
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Crit,Message=", pStrModule);
@@ -156,8 +169,10 @@ void AvxLog::Crit(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Alert(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 	
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Alert,Message=", pStrModule);
@@ -173,8 +188,10 @@ void AvxLog::Alert(const char* pStrModule, const char* pStrFormat, ...)
 
 void AvxLog::Fatal(const char* pStrModule, const char* pStrFormat, ...)
 {
+	if(false == g_bLoggingEnabled)
+		return;
 	if(NULL == g_pLoggingServices)
-		return; // throw AVSException
+		g_pLoggingServices = new AvxLog();
 	
 	memset(AvxLog::m_varArgsBuffer, 0, (1 + MAX_VARARGS_LEN)*sizeof(char));
 	sprintf(AvxLog::m_varArgsBuffer, "%s,Type=Fatal,Message=", pStrModule);
@@ -371,6 +388,7 @@ void AvxLog::TerminateLogging()
     {
         delete AvxLog::g_pLoggingServices;
         AvxLog::g_pLoggingServices = NULL;
+		AvxLog::g_bLoggingEnabled = false;
     }
 }
 
