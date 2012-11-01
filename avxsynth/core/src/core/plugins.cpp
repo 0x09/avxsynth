@@ -73,10 +73,17 @@ void FreeLibraries(void* loaded_plugins, IScriptEnvironment* env) {
   memset(loaded_plugins, 0, max_plugins*sizeof(HMODULE));
 }
 
+#ifndef RTLD_DEEPBIND
+#	ifdef __APPLE__
+#		define RTLD_DEEPBIND RTLD_FIRST
+#	else // best of luck
+#		define RLTD_DEEPBIND 0
+#	endif
+#endif
 static bool IdentifiedLibAvxsynthDuplicate(const char* filename)
 {
     bool bIdentified = false;
-	HMODULE hmod = dlopen(filename, RTLD_LOCAL | RTLD_NOW | RTLD_FIRST);
+	HMODULE hmod = dlopen(filename, RTLD_LOCAL | RTLD_NOW | RTLD_DEEPBIND);
 	if(hmod) {
 		if(dlsym(hmod, "add_built_in_functions_Audio_filters")) {
 			dlclose(hmod);
