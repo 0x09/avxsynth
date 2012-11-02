@@ -1,0 +1,261 @@
+diff --git Makefile Makefile
+index 7a22c42..3d4f7aa 100644
+--- Makefile
++++ Makefile
+@@ -42,7 +42,9 @@ SRCCLI +=
+ endif
+ 
+ # Optional module sources
+-ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
++ifneq ($(findstring HAVE_AVX 1, $(CONFIG)),)
++SRCCLI += input/avx.c
++else ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
+ SRCCLI += input/avs.c
+ endif
+ 
+diff --git configure configure
+index 01da01e..a788b1a 100755
+--- configure
++++ configure
+@@ -46,7 +46,7 @@ Cross-compilation:
+   --sysroot=SYSROOT        root of cross-build tree
+ 
+ External library support:
+-  --disable-avs            disable avisynth support (windows only)
++  --disable-avs            disable avisynth support
+   --disable-swscale        disable swscale support
+   --disable-lavf           disable libavformat support
+   --disable-ffms           disable ffmpegsource support
+@@ -913,6 +913,20 @@ if [ "$avs" = "auto" ] ; then
+     if [ $SYS = WINDOWS ] || ([ $SYS = CYGWIN ] && cc_check windows.h "" "LoadLibrary(0);") ; then
+         avs="yes"
+         define HAVE_AVS
++    else
++        if ${cross_prefix}pkg-config --exists avxsynth 2>/dev/null; then
++            AVS_LIBS="$AVS_LIBS $(${cross_prefix}pkg-config --libs avxsynth)"
++            AVS_CFLAGS="$AVS_CFLAGS $(${cross_prefix}pkg-config --cflags avxsynth)"
++        fi
++        [ -z "$AVS_LIBS" ] && AVS_LIBS="-lavxsynth"
++
++        if cc_check "avxsynth/avxsynth_c.h" "$AVS_CFLAGS $AVS_LIBS" "avs_defined(avs_void);" ; then
++            avs="yes"
++            LDFLAGSCLI="$AVS_LIBS $LDFLAGSCLI"
++            CFLAGS="$CFLAGS $AVS_LIBS"
++            define HAVE_AVX
++            define HAVE_AVS
++        fi
+     fi
+ fi
+ 
+diff --git input/avx.c input/avx.c
+new file mode 100644
+index 0000000..599873f
+--- /dev/null
++++ input/avx.c
+@@ -0,0 +1,206 @@
++/*****************************************************************************
++ * avx.c: avxsynth input
++ *****************************************************************************
++ * Copyright (C) 2009-2012 x264 project
++ *
++ * Authors: Steven Walters <kemuri9@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02111, USA.
++ *
++ * This program is also available under a commercial proprietary license.
++ * For more information, contact us at licensing@x264.com.
++ *****************************************************************************/
++
++#include "input.h"
++#include <avxsynth/avxsynth_c.h>
++#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "avx", __VA_ARGS__ )
++
++#if HAVE_SWSCALE
++#include <libavutil/pixfmt.h>
++#endif
++
++typedef struct
++{
++    AVS_Clip *clip;
++    AVS_ScriptEnvironment *env;
++    int num_frames;
++} avs_hnd_t;
++
++static AVS_Value update_clip( avs_hnd_t *h, const AVS_VideoInfo **vi, AVS_Value res, AVS_Value release )
++{
++    avs_release_clip( h->clip );
++    h->clip = avs_take_clip( res, h->env );
++    avs_release_value( release );
++    *vi = avs_get_video_info( h->clip );
++    return res;
++}
++
++static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, cli_input_opt_t *opt )
++{
++    FILE *fh = fopen( psz_filename, "r" );
++    if( !fh )
++        return -1;
++    FAIL_IF_ERROR( !x264_is_regular_file( fh ), "AVS input is incompatible with non-regular file `%s'\n", psz_filename );
++    fclose( fh );
++
++    avs_hnd_t *h = malloc( sizeof(avs_hnd_t) );
++    if( !h )
++        return -1;
++
++    h->env = avs_create_script_environment( AVISYNTH_INTERFACE_VERSION );
++    const char *error = avs_get_error( h->env );
++    FAIL_IF_ERROR( error, "%s\n", error );
++    AVS_Value arg = avs_new_value_string( psz_filename );
++    AVS_Value res = avs_invoke( h->env, "Import", arg, NULL );
++    FAIL_IF_ERROR( avs_is_error( res ), "%s\n", avs_as_string( res ) )
++    FAIL_IF_ERROR( !avs_is_clip( res ), "`%s' didn't return a video clip\n", psz_filename )
++    h->clip = avs_take_clip( res, h->env );
++    const AVS_VideoInfo *vi = avs_get_video_info( h->clip );
++    FAIL_IF_ERROR( !avs_has_video( vi ), "`%s' has no video data\n", psz_filename )
++    /* if the clip is made of fields instead of frames, call weave to make them frames */
++    if( avs_is_field_based( vi ) )
++    {
++        x264_cli_log( "avs", X264_LOG_WARNING, "detected fieldbased (separated) input, weaving to frames\n" );
++        AVS_Value tmp = avs_invoke( h->env, "Weave", res, NULL );
++        FAIL_IF_ERROR( avs_is_error( tmp ), "couldn't weave fields into frames\n" )
++        res = update_clip( h, &vi, tmp, res );
++        info->interlaced = 1;
++        info->tff = avs_is_tff( vi );
++    }
++#if !HAVE_SWSCALE
++    /* if swscale is not available, convert the CSP if necessary */
++    FAIL_IF_ERROR((opt->output_csp == X264_CSP_I422 || opt->output_csp == X264_CSP_I444),
++                   "swscale is required for i422/i444 output\n" )
++    if( (opt->output_csp == X264_CSP_I420 && !avs_is_yv12( vi )) || (opt->output_csp == X264_CSP_RGB && !avs_is_rgb( vi )) )
++    {
++
++        const char *csp = opt->output_csp == X264_CSP_I420 ? "YV12" : "RGB";
++        x264_cli_log( "avs", X264_LOG_WARNING, "converting input clip to %s\n", csp );
++        FAIL_IF_ERROR( opt->output_csp == X264_CSP_I420 && info->interlaced && (vi->height&3),
++                       "input clip height not divisible by 4 (%dx%d)\n", vi->width, vi->height )
++        FAIL_IF_ERROR( (opt->output_csp == X264_CSP_I420 || info->interlaced) && (vi->height&1),
++                       "input clip height not divisible by 2 (%dx%d)\n", vi->width, vi->height )
++        char conv_func[14] = { "ConvertTo" };
++        strcat( conv_func, csp );
++        char matrix[7] = "";
++        int arg_count = 2;
++        if( ((opt->output_csp == X264_CSP_RGB && avs_is_yuv( vi )) || (opt->output_csp != X264_CSP_RGB && avs_is_rgb( vi ))) )
++        {
++            // if converting from yuv, then we specify the matrix for the input, otherwise use the output's.
++            int use_pc_matrix = avs_is_yuv( vi ) ? opt->input_range == RANGE_PC : opt->output_range == RANGE_PC;
++            strcpy( matrix, use_pc_matrix ? "PC." : "Rec" );
++            strcat( matrix, "601" ); /* FIXME: use correct coefficients */
++            arg_count++;
++            // notification that the input range has changed to the desired one
++            opt->input_range = opt->output_range;
++        }
++        const char *arg_name[] = { NULL, "interlaced", "matrix" };
++        AVS_Value arg_arr[] = { res, avs_new_value_bool( info->interlaced ), avs_new_value_string( matrix ) };
++        AVS_Value res2 = avs_invoke( h->env, conv_func, avs_new_value_array( arg_arr, arg_count ), arg_name );
++        FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert input clip to %s\n", csp )
++        res = update_clip( h, &vi, res2, res );
++    }
++    /* if swscale is not available, change the range if necessary. This only applies to YUV-based CSPs however */
++    if( avs_is_yuv( vi ) && opt->output_range != RANGE_AUTO && ((opt->input_range == RANGE_PC) != opt->output_range) )
++    {
++        const char *levels = opt->output_range ? "TV->PC" : "PC->TV";
++        x264_cli_log( "avs", X264_LOG_WARNING, "performing %s conversion\n", levels );
++        AVS_Value arg_arr[] = { res, avs_new_value_string( levels ) };
++        const char *arg_name[] = { NULL, "levels" };
++        AVS_Value res2 = avs_invoke( h->env, "ColorYUV", avs_new_value_array( arg_arr, 2 ), arg_name );
++        FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert range: %s\n", avs_as_error( res2 ) )
++        res = update_clip( h, &vi, res2, res );
++        // notification that the input range has changed to the desired one
++        opt->input_range = opt->output_range;
++    }
++#endif
++    avs_release_value( res );
++
++    info->width   = vi->width;
++    info->height  = vi->height;
++    info->fps_num = vi->fps_numerator;
++    info->fps_den = vi->fps_denominator;
++    h->num_frames = info->num_frames = vi->num_frames;
++    info->thread_safe = 1;
++    if( avs_is_rgb32( vi ) )
++        info->csp = X264_CSP_BGRA | X264_CSP_VFLIP;
++    else if( avs_is_rgb24( vi ) )
++        info->csp = X264_CSP_BGR | X264_CSP_VFLIP;
++    else if( avs_is_yv12( vi ) )
++        info->csp = X264_CSP_I420;
++#if HAVE_SWSCALE
++    else if( avs_is_yuy2( vi ) )
++        info->csp = PIX_FMT_YUYV422 | X264_CSP_OTHER;
++#endif
++    else
++        info->csp = X264_CSP_NONE;
++    info->vfr = 0;
++
++    *p_handle = h;
++    return 0;
++}
++
++static int picture_alloc( cli_pic_t *pic, int csp, int width, int height )
++{
++    if( x264_cli_pic_alloc( pic, X264_CSP_NONE, width, height ) )
++        return -1;
++    pic->img.csp = csp;
++    const x264_cli_csp_t *cli_csp = x264_cli_get_csp( csp );
++    if( cli_csp )
++        pic->img.planes = cli_csp->planes;
++    else
++        pic->img.planes = 1; // yuy2 is one plane
++    return 0;
++}
++
++static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
++{
++    static const int plane[3] = { AVS_PLANAR_Y, AVS_PLANAR_U, AVS_PLANAR_V };
++    avs_hnd_t *h = handle;
++    if( i_frame >= h->num_frames )
++        return -1;
++    AVS_VideoFrame *frm = pic->opaque = avs_get_frame( h->clip, i_frame );
++    const char *err = avs_clip_get_error( h->clip );
++    FAIL_IF_ERROR( err, "%s occurred while reading frame %d\n", err, i_frame )
++    for( int i = 0; i < pic->img.planes; i++ )
++    {
++        /* explicitly cast away the const attribute to avoid a warning */
++        pic->img.plane[i] = (uint8_t*)avs_get_read_ptr_p( frm, plane[i] );
++        pic->img.stride[i] = avs_get_pitch_p( frm, plane[i] );
++    }
++    return 0;
++}
++
++static int release_frame( cli_pic_t *pic, hnd_t handle )
++{
++    avs_release_video_frame( pic->opaque );
++    return 0;
++}
++
++static void picture_clean( cli_pic_t *pic )
++{
++    memset( pic, 0, sizeof(cli_pic_t) );
++}
++
++static int close_file( hnd_t handle )
++{
++    avs_hnd_t *h = handle;
++    avs_release_clip( h->clip );
++    avs_delete_script_environment( h->env );
++    free( h );
++    return 0;
++}
++
++const cli_input_t avs_input = { open_file, picture_alloc, read_frame, release_frame, picture_clean, close_file };
