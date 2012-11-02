@@ -1403,72 +1403,6 @@ bool ScriptEnvironment::PluginsFolderIsNotEmpty()
   return bFolderNotEmpty;
 }
 
-bool ScriptEnvironment::IsPluginNameAcceptable(char* pStrFilename)
-{
-    // Linux allows all kinds of strange filenames, opening up the opportunities
-    // for people who might name the file something like 'rm -rf /' and toss it
-    // to the avxplugins folder. Using such name to construct a string to execute
-    // within the shell may cause a lot of trouble. 
-    //
-    // To prevent the security threat, we will here scrutinize the name of loaded
-    // library file against the typical practices of naming Linux libraries
-    //
-    
-    //
-    // Extract the pure filename first
-    //
-    std::string strTest = pStrFilename;
-    size_t nLastSlashPos = strTest.find_last_of("/");
-    if(std::string::npos != nLastSlashPos)
-        strTest = strTest.substr(nLastSlashPos + 1);
-        
-    //
-    // It must have '.so' somewhere in the filename
-    //
-    size_t nDotSoPosition = strTest.find(".so");
-    if(std::string::npos == nDotSoPosition)
-    {
-        AVXLOG_ERROR("Plugin filename \"%s\" does not have .so extension", pStrFilename);
-        return false;
-    }
-    else
-    {
-        std::string strAfterDotSo = strTest.substr(nDotSoPosition + strlen(".so"));
-        size_t nExtraChars = strAfterDotSo.length();
-        for(size_t i = 0; i < nExtraChars; i++)
-        {
-            char chTest = strAfterDotSo[i];
-            if(('.' != chTest) && (false == isdigit(chTest)))
-            {
-                AVXLOG_ERROR("Plugin filename \"%s\" has non-standard version string (after .so)", pStrFilename);
-                return false;
-            }   
-        }
-    }
-    
-    //
-    // The names containing shell special characters will be rejected
-    //
-    size_t nLength = strTest.length();
-    for(size_t i = 0; i < nLength; i++)
-    {
-        char chTest = strTest[i];
-        if((';'  == chTest)  || 
-           ('*'  == chTest)  || 
-           ('?'  == chTest)  || 
-           ('^'  == chTest)  ||
-           ('$'  == chTest)  ||
-           ('@'  == chTest)  ||
-           ('\'' == chTest) ||
-           ('\\' == chTest))
-        {
-            AVXLOG_ERROR("Plugin filename \"%s\" contains unusual characters", pStrFilename);
-            return false;
-        }
-    }
-    return true;
-}
-
 bool ScriptEnvironment::LoadPluginsMatching(const char* pattern)
 {
   const char* plugin_dir = GetPluginDirectory();
@@ -1493,9 +1427,6 @@ bool ScriptEnvironment::LoadPluginsMatching(const char* pattern)
       unsigned long nFilenameLength = strlen(pItem->d_name);
       if(1 == nFilenameLength || 2 == nFilenameLength)
 	  continue; 	// exclude "." and ".." which are mandatory in each folder
-
-      if(false == IsPluginNameAcceptable(pItem->d_name))
-        continue;
       
       unsigned long nPluginPathBytes = 1 + nFolderPathLength + nFilenameLength + 1; // last +1 is for '/' in between 
       
