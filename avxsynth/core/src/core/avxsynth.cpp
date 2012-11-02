@@ -897,9 +897,6 @@ private:
 
   Cache* CacheHead;
 
-  HRESULT hrfromcoinit;
-  pthread_t coinitThreadId;
-
   static long refcount; // Global to all ScriptEnvironment objects
 };
 
@@ -911,22 +908,8 @@ ScriptEnvironment::ScriptEnvironment()
     function_table(This()),
     unpromotedvfbs(&video_frame_buffers),
     PlanarChromaAlignmentState(true), // Change to "true" for 2.5.7
-	CacheHead(0), hrfromcoinit(E_FAIL), coinitThreadId(0)
+    CacheHead(0)
 {
-
-  try {
-    // Make sure COM is initialised
-    hrfromcoinit = S_OK; // CoInitialize(NULL);
-
-    // If it was already init'd then decrement
-    // the use count and leave it alone!
-    if(hrfromcoinit == S_FALSE) {
-      hrfromcoinit=E_FAIL;
-      //CoUninitialize();
-    }
-    // Remember our threadId.
-    coinitThreadId=pthread_self(); // GetCurrentThreadId();
-
     CPU_id = CPUCheckForExtensions();
 
     if(InterlockedCompareExchange(&refcount, 1, 0) == 0)//tsp June 2005 Initialize Recycle bin
@@ -976,17 +959,6 @@ ScriptEnvironment::ScriptEnvironment()
 	LoadBuiltInPlugins();
     PrescanPlugins();
     ExportFilters();
-  }
-  catch (AvisynthError err) {
-/*    if(SUCCEEDED(hrfromcoinit)) {
-      hrfromcoinit=E_FAIL;
-      CoUninitialize();
-    }
-*/
-    // Needs must, to not loose the text we
-    // must leak a little memory.
-    throw AvisynthError(strdup(err.msg));
-  }
 }
 
 void ScriptEnvironment::DebugListBuiltInFunctions(void)
@@ -1044,12 +1016,6 @@ ScriptEnvironment::~ScriptEnvironment() {
   if(!InterlockedDecrement((long*)&refcount)){
 	delete g_Bin;//tsp June 2005 Cleans up the heap
 	g_Bin=NULL;
-  }
-  // If we init'd COM and this is the right thread then release it
-  // If it's the wrong threadId then tuff, nothing we can do.
-  if(pthread_equal(coinitThreadId,pthread_self())) {
-    hrfromcoinit=E_FAIL;
-    //CoUninitialize();
   }
 
   FreeAllBuiltInPlugins();
