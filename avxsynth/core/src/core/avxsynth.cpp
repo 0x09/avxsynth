@@ -1047,7 +1047,7 @@ ScriptEnvironment::~ScriptEnvironment() {
   }
   // If we init'd COM and this is the right thread then release it
   // If it's the wrong threadId then tuff, nothing we can do.
-  if(coinitThreadId == pthread_self()) {
+  if(pthread_equal(coinitThreadId,pthread_self())) {
     hrfromcoinit=E_FAIL;
     //CoUninitialize();
   }
