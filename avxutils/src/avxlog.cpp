@@ -47,7 +47,7 @@ namespace avxsynth
 AvxLog* AvxLog::g_pLoggingServices = NULL;
 char 	AvxLog::m_varArgsBuffer[1 + MAX_VARARGS_LEN];
 bool    AvxLog::g_bLoggingEnabled = true;
-const static log4cpp::Priority::Value g_logLevelDefault = log4cpp::Priority::INFO;
+const static log4cpp::Priority::Value g_logLevelDefault = log4cpp::Priority::ERROR;
 
 void AvxLog::Debug(const char* pStrModule, const char* pStrFormat, ...)
 {
@@ -220,14 +220,14 @@ void AvxLog::ReadConfig(void)
     
     std::string strAvxSynthFolder   = std::string(pStrHomeFolderPath) + std::string("/.avxsynth");
     std::string strLoggingConfFile  = strAvxSynthFolder + std::string("/avxsynthlog.conf");
-    std::string strDefaultLogPath   = strAvxSynthFolder + std::string("/log");
+    std::string strDefaultLogPath;
     std::string strLogPath;
     std::string strLogLevel;
     
     struct stat st;
     bool bAvxSynthFolderExists      = (0 == stat(strAvxSynthFolder.c_str(), &st));
     bool bLoggingConfFileExists     = (0 == stat(strLoggingConfFile.c_str(), &st));
-    bool bDefaultLogFolderExists    = (0 == stat(strDefaultLogPath.c_str(), &st));
+    bool bDefaultLogFolderExists    = strDefaultLogPath.empty() || (0 == stat(strDefaultLogPath.c_str(), &st));
     
     if(bAvxSynthFolderExists)
     {
@@ -336,7 +336,7 @@ void AvxLog::ReadConfig(void)
             AVXLOG_ERROR("Failed creating non-existent %s folder\n", strAvxSynthFolder.c_str());
             return;
         }
-        if(mkdir(strDefaultLogPath.c_str(), 0777))
+        if(!strDefaultLogPath.empty() && mkdir(strDefaultLogPath.c_str(), 0777))
         {
             AVXLOG_ERROR("Failed creating non-existent default logging folder %s\n", strDefaultLogPath.c_str());
             return;
