@@ -214,7 +214,7 @@ void AvxLog::ReadConfig(void)
     char* pStrHomeFolderPath = getenv("HOME");
     if(NULL == pStrHomeFolderPath)
     {
-        fprintf(stderr, "Failed retrieving the value of $HOME env variable\n");
+        AVXLOG_ERROR("%s","Failed retrieving the value of $HOME env variable\n");
         return;
     }
     
@@ -240,7 +240,7 @@ void AvxLog::ReadConfig(void)
             FILE* fp = fopen(strLoggingConfFile.c_str(), "r");
             if(NULL == fp)
             {
-                fprintf(stderr, "Failed opening %s for reading\n", strLoggingConfFile.c_str());
+                AVXLOG_ERROR("Failed opening %s for reading\n", strLoggingConfFile.c_str());
                 return;
             }
             
@@ -274,14 +274,14 @@ void AvxLog::ReadConfig(void)
             
             if(strSpecifiedLogPath.empty())
             {
-                fprintf(stderr, "No valid avxsynth log path found in %s\n", strLoggingConfFile.c_str());
+                AVXLOG_NOTICE("No valid avxsynth log path found in %s\n", strLoggingConfFile.c_str());
             }
             else
             {
                 bool bSpecifiedLogPathExists = (0 == stat(strSpecifiedLogPath.c_str(), &st));
                 if(false == bSpecifiedLogPathExists && mkdir(strSpecifiedLogPath.c_str(), 0777))
                 {
-                    fprintf(stderr, "Failed creating non-existing folder %s (specified in %s)\n",
+                    AVXLOG_ERROR("Failed creating non-existing folder %s (specified in %s)\n",
                                         strSpecifiedLogPath.c_str(), strLoggingConfFile.c_str());
                 }
                 else
@@ -296,7 +296,7 @@ void AvxLog::ReadConfig(void)
             FILE* fp = fopen(strLoggingConfFile.c_str(), "w");
             if(NULL == fp)
             {
-                fprintf(stderr, "Failed creating non-existent %s\n", strLoggingConfFile.c_str());
+                AVXLOG_ERROR("Failed creating non-existent %s\n", strLoggingConfFile.c_str());
                 return;
             }
             
@@ -306,7 +306,7 @@ void AvxLog::ReadConfig(void)
                 {
                     fclose(fp);
                     fp = NULL;
-                    fprintf(stderr, "Failed creating non-existent default log folder %s\n", strDefaultLogPath.c_str());
+                    AVXLOG_ERROR("Failed creating non-existent default log folder %s\n", strDefaultLogPath.c_str());
                     return;
                 }
             }
@@ -333,18 +333,18 @@ void AvxLog::ReadConfig(void)
         // 
         if(mkdir(strAvxSynthFolder.c_str(), 0777))
         {
-            fprintf(stderr, "Failed creating non-existent %s folder\n", strAvxSynthFolder.c_str());
+            AVXLOG_ERROR("Failed creating non-existent %s folder\n", strAvxSynthFolder.c_str());
             return;
         }
         if(mkdir(strDefaultLogPath.c_str(), 0777))
         {
-            fprintf(stderr, "Failed creating non-existent default logging folder %s\n", strDefaultLogPath.c_str());
+            AVXLOG_ERROR("Failed creating non-existent default logging folder %s\n", strDefaultLogPath.c_str());
             return;
         }
         FILE* fp = fopen(strLoggingConfFile.c_str(), "w");
         if(NULL == fp)
         {
-            fprintf(stderr, "Failed creating non-existent %s file\n", strLoggingConfFile.c_str());
+            AVXLOG_ERROR("Failed creating non-existent %s file\n", strLoggingConfFile.c_str());
             return;
         }
         fprintf(fp, "# Syntax: LOG_PATH=<log folder path> // do not use double quotes\n");
@@ -392,7 +392,7 @@ void AvxLog::ReadConfig(void)
 			m_category.setPriority(log4cpp::Priority::getPriorityValue(strLogLevel));
 		}
 		catch(std::invalid_argument) {
-			fprintf(stderr,"Invalid loglevel \"%s\" found in %s.\n", strLogLevel.c_str(), strLoggingConfFile.c_str());
+			AVXLOG_ERROR("Invalid loglevel \"%s\" found in %s.\n", strLogLevel.c_str(), strLoggingConfFile.c_str());
 		}
 	}
 }
