@@ -360,7 +360,7 @@ void AvxLog::ReadConfig(void)
 		fprintf(fp, "LOG_LEVEL=%s\n",log4cpp::Priority::getPriorityName(g_logLevelDefault).c_str());
         fclose(fp);
         fp = NULL;
-        strLogPath = strDefaultLogPath.c_str();
+        strLogPath = strDefaultLogPath;
     }
 	
     if(!strLogPath.empty())
