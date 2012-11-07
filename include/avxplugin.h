@@ -81,10 +81,11 @@ typedef long			PixOffset;
 #ifdef _MSC_VER
   #include <crtdbg.h>
 #else
-  #define _ASSERTE(x) assert(x)
 #if !defined(__APPLE__) || !defined(assert) 
   #include <assert.h>
 #endif
+  #define _ASSERT(x) assert(x)
+  #define _ASSERTE(x) assert(x)
 #endif
 
 

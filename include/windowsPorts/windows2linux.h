@@ -7,7 +7,7 @@
 //
 // Data types conversions
 //
-#include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 #include "basicDataTypeConversions.h"
 
@@ -55,7 +55,6 @@ namespace avxsynth {
 #define MAKEDWORD(a,b,c,d) ((a << 24) | (b << 16) | (c << 8) | (d))
 #define MAKEWORD(a,b) ((a << 8) | (b))
 
-#define _ASSERT                             assert
 #define lstrlen                             strlen
 #define lstrcpy                             strcpy
 #define lstrcmpi                            strcasecmp
@@ -64,10 +63,6 @@ namespace avxsynth {
 #define InterlockedDecrement(x)             __sync_fetch_and_sub((x), 1)
 // Windows uses (new, old) ordering but GCC has (old, new)
 #define InterlockedCompareExchange(x,y,z)   __sync_val_compare_and_swap(x,z,y)
-#define InitializeCriticalSection(x)        pthread_mutex_init(x, NULL)
-#define EnterCriticalSection(x)             pthread_mutex_lock(x)
-#define LeaveCriticalSection(x)             pthread_mutex_unlock(x)
-#define DeleteCriticalSection(x)            pthread_mutex_destroy(x)
 
 #define UInt32x32To64(a, b)                 ( (uint64_t) ( ((uint64_t)((uint32_t)(a))) * ((uint32_t)(b))  ) ) 
 #define Int64ShrlMod32(a, b)                ( (uint64_t) ( (uint64_t)(a) >> (b) ) )
