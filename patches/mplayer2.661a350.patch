@@ -1,28 +1,28 @@
 diff --git Makefile Makefile
-index d1ce8dd..ef83814 100644
+index d649847..7d08793 100644
 --- Makefile
 +++ Makefile
-@@ -213,6 +213,7 @@ SRCS_COMMON-$(WIN32DLL)              += libmpcodecs/ad_acm.c \
+@@ -197,6 +197,7 @@ SRCS_COMMON-$(WIN32DLL)              += libmpcodecs/ad_acm.c \
  SRCS_COMMON-$(XANIM_CODECS)          += libmpcodecs/vd_xanim.c
  SRCS_COMMON-$(XMMS_PLUGINS)          += libmpdemux/demux_xmms.c
  SRCS_COMMON-$(XVID4)                 += libmpcodecs/vd_xvid4.c
 +SRCS_COMMON-$(AVXSYNTH)              += libmpdemux/demux_avx.c
+ 
  SRCS_COMMON = asxparser.c \
                av_log.c \
-               av_opts.c \
 diff --git configure configure
-index 18bc404..269018f 100755
+index 2aa1dc9..0c2b409 100755
 --- configure
 +++ configure
-@@ -363,6 +363,7 @@ Optional features:
-   --disable-libass       disable subtitle rendering with libass [autodetect]
+@@ -354,6 +354,7 @@ Optional features:
    --enable-rpath         enable runtime linker path for extra libs [disabled]
    --disable-libpostproc  disable postprocess filter (vf_pp) [autodetect]
+   --disable-libavresample disable libavresample (sample format conversion) [autodetect]
 +  --enable-avxsynth      enable AVS script input via AvxSynth [autodetect]
  
  Codecs:
    --enable-gif              enable GIF support [autodetect]
-@@ -712,6 +713,7 @@ def_stream_cache="#define CONFIG_STREAM_CACHE 1"
+@@ -655,6 +656,7 @@ def_stream_cache="#define CONFIG_STREAM_CACHE 1"
  def_priority="#undef CONFIG_PRIORITY"
  def_pthread_cache="#undef PTHREAD_CACHE"
  need_shmem=yes
@@ -30,7 +30,7 @@ index 18bc404..269018f 100755
  for ac_option do
    case "$ac_option" in
    --help|-help|-h)
-@@ -1022,7 +1024,9 @@ for ac_option do
+@@ -935,7 +937,9 @@ for ac_option do
    --enable-libav)       ffmpeg=yes      ;;
    --ffmpeg-source-dir=*)
      _ffmpeg_source=$(echo $ac_option | cut -d '=' -f 2 ) ;;
@@ -41,7 +41,7 @@ index 18bc404..269018f 100755
    --enable-lirc)        _lirc=yes       ;;
    --disable-lirc)       _lirc=no        ;;
    --enable-lircc)       _lircc=yes      ;;
-@@ -3778,7 +3782,7 @@ if test "$quicktime" = auto ; then
+@@ -3538,7 +3544,7 @@ if test "$quicktime" = auto ; then
    statement_check QuickTime/QuickTime.h 'ImageDescription *desc; EnterMovies(); ExitMovies()' -framework QuickTime && quicktime=yes
  fi
  if test "$quicktime" = yes ; then
@@ -50,9 +50,9 @@ index 18bc404..269018f 100755
    def_quicktime='#define CONFIG_QUICKTIME 1'
  else
    def_quicktime='#undef CONFIG_QUICKTIME'
-@@ -5630,6 +5634,21 @@ else
+@@ -5010,6 +5016,21 @@ else
  fi
- echores "$_live"
+ echores "$_lcms2"
  
 +echocheck "AvxSynth"
 +if test "$_avxsynth" = auto ; then
@@ -70,39 +70,24 @@ index 18bc404..269018f 100755
 +fi
 +echores "$_avxsynth"
  
- 
  # Test with > against Libav 0.8 versions which will NOT work rather than
-@@ -6405,6 +6424,7 @@ XV = $_xv
+ # specify minimum version, to allow (future) point releases to possibly work.
+@@ -5740,6 +5761,7 @@ XMMS_PLUGINS = $_xmms
+ XV = $_xv
  XVID4 = $_xvid
- XVR100 = $_xvr100
  YUV4MPEG = $_yuv4mpeg
 +AVXSYNTH = $_avxsynth
  
  # FFmpeg
  FFMPEG_INTERNALS = $ffmpeg_internals
-@@ -6612,6 +6632,7 @@ $def_zlib
- $def_libpostproc
+@@ -5932,6 +5954,7 @@ $def_libpostproc
+ $def_libavresample
  $def_libnut
  
 +$def_avxsynth
  
  /* binary codecs */
  $def_qtx
-diff --git libmpcodecs/vf_lavc.c libmpcodecs/vf_lavc.c
-index b2c1dd7..8a49422 100644
---- libmpcodecs/vf_lavc.c
-+++ libmpcodecs/vf_lavc.c
-@@ -76,8 +76,8 @@ static int config(struct vf_instance *vf,
- 	return 0;
-     }
- 
--    if (lavc_venc_context.codec->encode == NULL) {
--	mp_msg(MSGT_VFILTER,MSGL_ERR,"avcodec init failed (ctx->codec->encode == NULL)!\n");
-+    if (lavc_venc_context.codec->encode2 == NULL) {
-+	mp_msg(MSGT_VFILTER,MSGL_ERR,"avcodec init failed (ctx->codec->encode2 == NULL)!\n");
- 	return 0;
-     }
- 
 diff --git libmpdemux/demux_avx.c libmpdemux/demux_avx.c
 new file mode 100644
 index 0000000..1f09ed6
@@ -520,10 +505,10 @@ index 0000000..1f09ed6
 +  demux_avx_control
 +};
 diff --git libmpdemux/demuxer.c libmpdemux/demuxer.c
-index f00b055..6d54ce3 100644
+index e2df5ca..0689b15 100644
 --- libmpdemux/demuxer.c
 +++ libmpdemux/demuxer.c
-@@ -94,6 +94,7 @@ extern const demuxer_desc_t demuxer_desc_lavf_preferred;
+@@ -92,6 +92,7 @@ extern const demuxer_desc_t demuxer_desc_lavf_preferred;
  extern const demuxer_desc_t demuxer_desc_aac;
  extern const demuxer_desc_t demuxer_desc_nut;
  extern const demuxer_desc_t demuxer_desc_mng;
@@ -531,7 +516,7 @@ index f00b055..6d54ce3 100644
  
  /* Please do not add any new demuxers here. If you want to implement a new
   * demuxer, add it to libavformat, except for wrappers around external
-@@ -165,6 +166,9 @@ const demuxer_desc_t *const demuxer_list[] = {
+@@ -157,6 +158,9 @@ const demuxer_desc_t *const demuxer_list[] = {
  #ifdef CONFIG_MNG
      &demuxer_desc_mng,
  #endif
@@ -542,11 +527,11 @@ index f00b055..6d54ce3 100644
       * demuxer, add it to libavformat, except for wrappers around external
       * libraries and demuxers requiring binary support. */
 diff --git libmpdemux/demuxer.h libmpdemux/demuxer.h
-index 24b4eda..cb04ee6 100644
+index 71f6e44..32409b9 100644
 --- libmpdemux/demuxer.h
 +++ libmpdemux/demuxer.h
-@@ -89,6 +89,7 @@ enum demuxer_type {
-     DEMUXER_TYPE_RTP_NEMESI,
+@@ -87,6 +87,7 @@ enum demuxer_type {
+     DEMUXER_TYPE_LAVF_PREFERRED,
      DEMUXER_TYPE_MNG,
      DEMUXER_TYPE_EDL,
 +    DEMUXER_TYPE_AVX,
