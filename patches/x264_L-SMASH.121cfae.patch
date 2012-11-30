@@ -1,0 +1,508 @@
+diff --git Makefile Makefile
+index 2dcd124..e2e70fc 100644
+--- Makefile
++++ Makefile
+@@ -45,7 +45,9 @@ SRCCLI +=
+ endif
+ 
+ # Optional module sources
+-ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
++ifneq ($(findstring HAVE_AVX 1, $(CONFIG)),)
++SRCCLI += input/avx.c
++else ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
+ SRCCLI += input/avs.c
+ endif
+ 
+@@ -72,7 +74,9 @@ ifneq ($(findstring HAVE_LAVF 1, $(CONFIG)),)
+ SRCCLI += input/audio/lavf.c
+ SRCCLI += audio/encoders/enc_lavc.c
+ endif
+-ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
++ifneq ($(findstring HAVE_AVX 1, $(CONFIG)),)
++SRCCLI += input/audio/avx.c
++else ifneq ($(findstring HAVE_AVS 1, $(CONFIG)),)
+ SRCCLI += input/audio/avs.c
+ endif
+ ifneq ($(findstring HAVE_LSMASH 1, $(CONFIG)),)
+diff --git configure configure
+index c24d78b..145fe8a 100755
+--- configure
++++ configure
+@@ -48,7 +48,7 @@ Cross-compilation:
+   --sysroot=SYSROOT        root of cross-build tree
+ 
+ External library support:
+-  --disable-avs            disable avisynth support (windows only)
++  --disable-avs            disable avisynth support
+   --disable-swscale        disable swscale support
+   --disable-lavf           disable libavformat support
+   --disable-ffms           disable ffmpegsource support
+@@ -1050,6 +1050,20 @@ if [ "$avs" = "auto" ] ; then
+     if [ $SYS = WINDOWS ] || ([ $SYS = CYGWIN ] && cc_check windows.h "" "LoadLibrary(0);") ; then
+         avs="yes"
+         define HAVE_AVS
++    else
++        if ${cross_prefix}pkg-config --exists avxsynth 2>/dev/null; then
++            AVS_LIBS="$AVS_LIBS $(${cross_prefix}pkg-config --libs avxsynth)"
++            AVS_CFLAGS="$AVS_CFLAGS $(${cross_prefix}pkg-config --cflags avxsynth)"
++        fi
++        [ -z "$AVS_LIBS" ] && AVS_LIBS="-lavxsynth"
++
++        if cc_check "avxsynth/avxsynth_c.h" "$AVS_CFLAGS $AVS_LIBS" "avs_defined(avs_void);" ; then
++            avs="yes"
++            LDFLAGSCLI="$AVS_LIBS $LDFLAGSCLI"
++            CFLAGS="$CFLAGS $AVS_LIBS"
++            define HAVE_AVX
++            define HAVE_AVS
++        fi
+     fi
+ fi
+ 
+diff --git input/audio/avx.c input/audio/avx.c
+new file mode 100644
+index 0000000..22b7eab
+--- /dev/null
++++ input/audio/avx.c
+@@ -0,0 +1,201 @@
++#include "filters/audio/internal.h"
++#include <assert.h>
++#include <stdio.h>
++#include <inttypes.h>
++
++#include <avxsynth/avxsynth_c.h>
++
++#define AVS_INTERFACE_25 2
++#define DEFAULT_BUFSIZE 192000 // 1 second of 48khz 32bit audio
++                               // same as AVCODEC_MAX_AUDIO_FRAME_SIZE
++
++typedef struct avs_source_t
++{
++    AUDIO_FILTER_COMMON
++
++    AVS_Clip *clip;
++    AVS_ScriptEnvironment *env;
++    enum SampleFmt sample_fmt;
++
++    int64_t num_samples;
++    int eof;
++    uint8_t *buffer;
++    intptr_t bufsize;
++} avs_source_t;
++
++const audio_filter_t audio_filter_avs;
++
++static void update_clip( avs_source_t *h, const AVS_VideoInfo **vi, AVS_Value *res )
++{
++    avs_release_clip( h->clip );
++    h->clip = avs_take_clip( *res, h->env );
++    *vi = avs_get_video_info( h->clip );
++    return;
++}
++
++#define GOTO_IF( cond, label, ... ) \
++if( cond ) \
++{ \
++    x264_cli_log( "avs", X264_LOG_ERROR, __VA_ARGS__ ); \
++    goto label; \
++}
++
++static int init( hnd_t *handle, const char *opt_str )
++{
++    assert( opt_str );
++    assert( !(*handle) ); // This must be the first filter
++    char **opts = x264_split_options( opt_str, (const char*[]){ "filename", "track", NULL } );
++
++    if( !opts )
++        return -1;
++
++    char *filename = x264_get_option( "filename", opts );
++    int track = x264_otoi( x264_get_option( "track", opts ), TRACK_ANY );
++
++    GOTO_IF( track == TRACK_NONE, fail2, "no valid track requested ('any' or 0)\n" )
++    GOTO_IF( track > 0, fail2, "only script imports are supported by this filter\n" )
++    GOTO_IF( !filename, fail2, "no filename given\n" )
++    GOTO_IF( !x264_is_regular_file_path( filename ), fail2, "reading audio from non-regular files is not supported\n" )
++
++    INIT_FILTER_STRUCT( audio_filter_avs, avs_source_t );
++
++    h->env = avs_create_script_environment( AVS_INTERFACE_25 );
++    GOTO_IF( !h->env, error, "failed to initiate avisynth\n" )
++
++    AVS_Value res = avs_void;
++	AVS_Value arg = avs_new_value_string( filename );
++    res = avs_invoke( h->env, "Import", arg, NULL );
++    avs_release_value( arg );
++    GOTO_IF( avs_is_error( res ), error, "%s\n", avs_as_string( res ) )
++
++    GOTO_IF( !avs_is_clip( res ), error, "no valid clip is found\n" )
++    h->clip = avs_take_clip( res, h->env );
++
++    const AVS_VideoInfo *vi = avs_get_video_info( h->clip );
++    GOTO_IF( !avs_has_audio( vi ), error, "no valid audio track is found\n" )
++
++    // video is unneeded, so disable it if any
++    res = avs_invoke( h->env, "KillVideo", res, NULL );
++    update_clip( h, &vi, &res );
++
++    switch( avs_sample_type( vi ) )
++    {
++      case AVS_SAMPLE_INT16:
++        h->sample_fmt = SMPFMT_S16;
++        break;
++      case AVS_SAMPLE_INT32:
++        h->sample_fmt = SMPFMT_S32;
++        break;
++      case AVS_SAMPLE_FLOAT:
++        h->sample_fmt = SMPFMT_FLT;
++        break;
++      case AVS_SAMPLE_INT8:
++        h->sample_fmt = SMPFMT_U8;
++        break;
++      case AVS_SAMPLE_INT24:
++      default:
++        h->sample_fmt = SMPFMT_NONE;
++        break;
++    }
++
++    if( h->sample_fmt == SMPFMT_NONE )
++    {
++        x264_cli_log( "avs", X264_LOG_INFO, "detected %dbit sample format, converting to float\n", avs_bytes_per_channel_sample( vi )*8 );
++        res = avs_invoke( h->env, "ConvertAudioToFloat", res, NULL );
++        GOTO_IF( avs_is_error( res ), error, "failed to convert audio sample format\n" )
++        update_clip( h, &vi, &res );
++        h->sample_fmt = SMPFMT_FLT;
++    }
++
++    avs_release_value( res );
++
++    h->info.samplerate     = avs_samples_per_second( vi );
++    h->info.channels       = avs_audio_channels( vi );
++    h->info.framelen       = 1;
++    h->info.chansize       = avs_bytes_per_channel_sample( vi );
++    h->info.samplesize     = h->info.chansize * h->info.channels;
++    h->info.framesize      = h->info.samplesize;
++    h->info.depth          = h->info.chansize;
++    h->info.timebase       = (timebase_t){ 1, h->info.samplerate };
++
++    h->num_samples = vi->num_audio_samples;
++    h->bufsize = DEFAULT_BUFSIZE;
++    h->buffer = malloc( h->bufsize );
++
++    x264_free_string_array( opts );
++    return 0;
++
++error:
++    AF_LOG_ERR( h, "error opening audio\n" );
++fail:
++    if( h )
++        free( h );
++    *handle = NULL;
++fail2:
++    x264_free_string_array( opts );
++    return -1;
++}
++
++static void free_packet( hnd_t handle, audio_packet_t *pkt )
++{
++    pkt->owner = NULL;
++    x264_af_free_packet( pkt );
++}
++
++static struct audio_packet_t *get_samples( hnd_t handle, int64_t first_sample, int64_t last_sample )
++{
++    avs_source_t *h = handle;
++    assert( first_sample >= 0 && last_sample > first_sample );
++    int64_t nsamples = last_sample - first_sample;
++
++    if( h->eof )
++        return NULL;
++
++    if( h->num_samples <= last_sample )
++    {
++        nsamples = h->num_samples - first_sample;
++        h->eof = 1;
++    }
++
++    audio_packet_t *pkt = calloc( 1, sizeof( audio_packet_t ) );
++    pkt->info           = h->info;
++    pkt->dts            = first_sample;
++    pkt->channels       = h->info.channels;
++    pkt->samplecount    = nsamples;
++    pkt->size           = pkt->samplecount * h->info.samplesize;
++
++    if( avs_get_audio( h->clip, h->buffer, first_sample, nsamples ) )
++        goto fail;
++
++    pkt->samples = x264_af_deinterleave2( h->buffer, h->sample_fmt, pkt->channels, pkt->samplecount );
++
++    if( h->eof )
++        pkt->flags |= AUDIO_FLAG_EOF;
++
++    return pkt;
++
++fail:
++    x264_af_free_packet( pkt );
++    return NULL;
++}
++
++static void avs_close( hnd_t handle )
++{
++    assert( handle );
++    avs_source_t *h = handle;
++    avs_release_clip( h->clip );
++    avs_delete_script_environment( h->env );
++    free( h->buffer );
++    free( h );
++}
++
++const audio_filter_t audio_filter_avs =
++{
++        .name        = "avs",
++        .description = "Retrive PCM samples from AVISynth script using AvxSynth",
++        .help        = "Arguments: filename",
++        .init        = init,
++        .get_samples = get_samples,
++        .free_packet = free_packet,
++        .close       = avs_close
++};
+diff --git input/avx.c input/avx.c
+new file mode 100644
+index 0000000..9710fc1
+--- /dev/null
++++ input/avx.c
+@@ -0,0 +1,235 @@
++/*****************************************************************************
++ * avx.c: avxsynth input
++ *****************************************************************************
++ * Copyright (C) 2009-2012 x264 project
++ *
++ * Authors: Steven Walters <kemuri9@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02111, USA.
++ *
++ * This program is also available under a commercial proprietary license.
++ * For more information, contact us at licensing@x264.com.
++ *****************************************************************************/
++
++#include "input.h"
++#include <avxsynth/avxsynth_c.h>
++#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "avx", __VA_ARGS__ )
++
++#if HAVE_AUDIO
++#include "audio/audio.h"
++#endif
++
++#if HAVE_SWSCALE
++#include <libavutil/pixfmt.h>
++#endif
++
++typedef struct
++{
++    AVS_Clip *clip;
++    AVS_ScriptEnvironment *env;
++    int num_frames;
++#if HAVE_AUDIO
++    char *filename;
++    int has_audio;
++#endif
++} avs_hnd_t;
++
++static AVS_Value update_clip( avs_hnd_t *h, const AVS_VideoInfo **vi, AVS_Value res, AVS_Value release )
++{
++    avs_release_clip( h->clip );
++    h->clip = avs_take_clip( res, h->env );
++    avs_release_value( release );
++    *vi = avs_get_video_info( h->clip );
++    return res;
++}
++
++static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, cli_input_opt_t *opt )
++{
++    FILE *fh = fopen( psz_filename, "r" );
++    if( !fh )
++        return -1;
++    FAIL_IF_ERROR( !x264_is_regular_file( fh ), "AVS input is incompatible with non-regular file `%s'\n", psz_filename );
++    fclose( fh );
++
++    avs_hnd_t *h = malloc( sizeof(avs_hnd_t) );
++    if( !h )
++        return -1;
++
++    h->env = avs_create_script_environment( AVISYNTH_INTERFACE_VERSION );
++    const char *error = avs_get_error( h->env );
++    FAIL_IF_ERROR( error, "%s\n", error );
++    AVS_Value arg = avs_new_value_string( psz_filename );
++    AVS_Value res = avs_invoke( h->env, "Import", arg, NULL );
++    FAIL_IF_ERROR( avs_is_error( res ), "%s\n", avs_as_string( res ) )
++    FAIL_IF_ERROR( !avs_is_clip( res ), "`%s' didn't return a video clip\n", psz_filename )
++    h->clip = avs_take_clip( res, h->env );
++    const AVS_VideoInfo *vi = avs_get_video_info( h->clip );
++    FAIL_IF_ERROR( !avs_has_video( vi ), "`%s' has no video data\n", psz_filename )
++
++#if HAVE_AUDIO
++    h->filename = strdup( psz_filename );
++    h->has_audio = !!avs_has_audio( vi );
++#endif
++
++    /* if the clip is made of fields instead of frames, call weave to make them frames */
++    if( avs_is_field_based( vi ) )
++    {
++        x264_cli_log( "avs", X264_LOG_WARNING, "detected fieldbased (separated) input, weaving to frames\n" );
++        AVS_Value tmp = avs_invoke( h->env, "Weave", res, NULL );
++        FAIL_IF_ERROR( avs_is_error( tmp ), "couldn't weave fields into frames\n" )
++        res = update_clip( h, &vi, tmp, res );
++        info->interlaced = 1;
++        info->tff = avs_is_tff( vi );
++    }
++#if !HAVE_SWSCALE
++    /* if swscale is not available, convert the CSP if necessary */
++    FAIL_IF_ERROR((opt->output_csp == X264_CSP_I422 || opt->output_csp == X264_CSP_I444),
++                   "swscale is required for i422/i444 output\n" )
++    if( (opt->output_csp == X264_CSP_I420 && !avs_is_yv12( vi )) || (opt->output_csp == X264_CSP_RGB && !avs_is_rgb( vi )) )
++    {
++
++        const char *csp = opt->output_csp == X264_CSP_I420 ? "YV12" : "RGB";
++        x264_cli_log( "avs", X264_LOG_WARNING, "converting input clip to %s\n", csp );
++        FAIL_IF_ERROR( opt->output_csp == X264_CSP_I420 && info->interlaced && (vi->height&3),
++                       "input clip height not divisible by 4 (%dx%d)\n", vi->width, vi->height )
++        FAIL_IF_ERROR( (opt->output_csp == X264_CSP_I420 || info->interlaced) && (vi->height&1),
++                       "input clip height not divisible by 2 (%dx%d)\n", vi->width, vi->height )
++        char conv_func[14] = { "ConvertTo" };
++        strcat( conv_func, csp );
++        char matrix[7] = "";
++        int arg_count = 2;
++        if( ((opt->output_csp == X264_CSP_RGB && avs_is_yuv( vi )) || (opt->output_csp != X264_CSP_RGB && avs_is_rgb( vi ))) )
++        {
++            // if converting from yuv, then we specify the matrix for the input, otherwise use the output's.
++            int use_pc_matrix = avs_is_yuv( vi ) ? opt->input_range == RANGE_PC : opt->output_range == RANGE_PC;
++            strcpy( matrix, use_pc_matrix ? "PC." : "Rec" );
++            strcat( matrix, "601" ); /* FIXME: use correct coefficients */
++            arg_count++;
++            // notification that the input range has changed to the desired one
++            opt->input_range = opt->output_range;
++        }
++        const char *arg_name[] = { NULL, "interlaced", "matrix" };
++        AVS_Value arg_arr[] = { res, avs_new_value_bool( info->interlaced ), avs_new_value_string( matrix ) };
++        AVS_Value res2 = avs_invoke( h->env, conv_func, avs_new_value_array( arg_arr, arg_count ), arg_name );
++        FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert input clip to %s\n", csp )
++        res = update_clip( h, &vi, res2, res );
++    }
++    /* if swscale is not available, change the range if necessary. This only applies to YUV-based CSPs however */
++    if( avs_is_yuv( vi ) && opt->output_range != RANGE_AUTO && ((opt->input_range == RANGE_PC) != opt->output_range) )
++    {
++        const char *levels = opt->output_range ? "TV->PC" : "PC->TV";
++        x264_cli_log( "avs", X264_LOG_WARNING, "performing %s conversion\n", levels );
++        AVS_Value arg_arr[] = { res, avs_new_value_string( levels ) };
++        const char *arg_name[] = { NULL, "levels" };
++        AVS_Value res2 = avs_invoke( h->env, "ColorYUV", avs_new_value_array( arg_arr, 2 ), arg_name );
++        FAIL_IF_ERROR( avs_is_error( res2 ), "couldn't convert range: %s\n", avs_as_error( res2 ) )
++        res = update_clip( h, &vi, res2, res );
++        // notification that the input range has changed to the desired one
++        opt->input_range = opt->output_range;
++    }
++#endif
++    avs_release_value( res );
++
++    info->width   = vi->width;
++    info->height  = vi->height;
++    info->fps_num = vi->fps_numerator;
++    info->fps_den = vi->fps_denominator;
++    h->num_frames = info->num_frames = vi->num_frames;
++    info->thread_safe = 1;
++    if( avs_is_rgb32( vi ) )
++        info->csp = X264_CSP_BGRA | X264_CSP_VFLIP;
++    else if( avs_is_rgb24( vi ) )
++        info->csp = X264_CSP_BGR | X264_CSP_VFLIP;
++    else if( avs_is_yv12( vi ) )
++        info->csp = X264_CSP_I420;
++#if HAVE_SWSCALE
++    else if( avs_is_yuy2( vi ) )
++        info->csp = PIX_FMT_YUYV422 | X264_CSP_OTHER;
++#endif
++    else
++        info->csp = X264_CSP_NONE;
++    info->vfr = 0;
++
++    *p_handle = h;
++    return 0;
++}
++
++static int picture_alloc( cli_pic_t *pic, int csp, int width, int height )
++{
++    if( x264_cli_pic_alloc( pic, X264_CSP_NONE, width, height ) )
++        return -1;
++    pic->img.csp = csp;
++    const x264_cli_csp_t *cli_csp = x264_cli_get_csp( csp );
++    if( cli_csp )
++        pic->img.planes = cli_csp->planes;
++    else
++        pic->img.planes = 1; // yuy2 is one plane
++    return 0;
++}
++
++static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
++{
++    static const int plane[3] = { AVS_PLANAR_Y, AVS_PLANAR_U, AVS_PLANAR_V };
++    avs_hnd_t *h = handle;
++    if( i_frame >= h->num_frames )
++        return -1;
++    AVS_VideoFrame *frm = pic->opaque = avs_get_frame( h->clip, i_frame );
++    const char *err = avs_clip_get_error( h->clip );
++    FAIL_IF_ERROR( err, "%s occurred while reading frame %d\n", err, i_frame )
++    for( int i = 0; i < pic->img.planes; i++ )
++    {
++        /* explicitly cast away the const attribute to avoid a warning */
++        pic->img.plane[i] = (uint8_t*)avs_get_read_ptr_p( frm, plane[i] );
++        pic->img.stride[i] = avs_get_pitch_p( frm, plane[i] );
++    }
++    return 0;
++}
++
++static int release_frame( cli_pic_t *pic, hnd_t handle )
++{
++    avs_release_video_frame( pic->opaque );
++    return 0;
++}
++
++static void picture_clean( cli_pic_t *pic )
++{
++    memset( pic, 0, sizeof(cli_pic_t) );
++}
++
++static int close_file( hnd_t handle )
++{
++    avs_hnd_t *h = handle;
++    avs_release_clip( h->clip );
++    avs_delete_script_environment( h->env );
++#if HAVE_AUDIO
++    free( h->filename );
++#endif
++    free( h );
++    return 0;
++}
++
++#if HAVE_AUDIO
++static hnd_t open_audio( hnd_t handle, int track )
++{
++    avs_hnd_t *h = handle;
++    if( !h->has_audio )
++        return NULL;
++    return x264_audio_open_from_file( "avs", h->filename, track );
++}
++
++const cli_input_t avs_input = { open_file, picture_alloc, read_frame, release_frame, picture_clean, close_file, open_audio };
++#else
++const cli_input_t avs_input = { open_file, picture_alloc, read_frame, release_frame, picture_clean, close_file };
++#endif
