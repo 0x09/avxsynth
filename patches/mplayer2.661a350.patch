@@ -11,7 +11,7 @@ index d649847..7d08793 100644
  SRCS_COMMON = asxparser.c \
                av_log.c \
 diff --git configure configure
-index 2aa1dc9..0c2b409 100755
+index 2aa1dc9..0de5074 100755
 --- configure
 +++ configure
 @@ -354,6 +354,7 @@ Optional features:
@@ -41,7 +41,7 @@ index 2aa1dc9..0c2b409 100755
    --enable-lirc)        _lirc=yes       ;;
    --disable-lirc)       _lirc=no        ;;
    --enable-lircc)       _lircc=yes      ;;
-@@ -3538,7 +3544,7 @@ if test "$quicktime" = auto ; then
+@@ -3538,7 +3542,7 @@ if test "$quicktime" = auto ; then
    statement_check QuickTime/QuickTime.h 'ImageDescription *desc; EnterMovies(); ExitMovies()' -framework QuickTime && quicktime=yes
  fi
  if test "$quicktime" = yes ; then
@@ -50,7 +50,7 @@ index 2aa1dc9..0c2b409 100755
    def_quicktime='#define CONFIG_QUICKTIME 1'
  else
    def_quicktime='#undef CONFIG_QUICKTIME'
-@@ -5010,6 +5016,21 @@ else
+@@ -5010,6 +5014,21 @@ else
  fi
  echores "$_lcms2"
  
@@ -72,7 +72,7 @@ index 2aa1dc9..0c2b409 100755
  
  # Test with > against Libav 0.8 versions which will NOT work rather than
  # specify minimum version, to allow (future) point releases to possibly work.
-@@ -5740,6 +5761,7 @@ XMMS_PLUGINS = $_xmms
+@@ -5740,6 +5759,7 @@ XMMS_PLUGINS = $_xmms
  XV = $_xv
  XVID4 = $_xvid
  YUV4MPEG = $_yuv4mpeg
@@ -80,7 +80,7 @@ index 2aa1dc9..0c2b409 100755
  
  # FFmpeg
  FFMPEG_INTERNALS = $ffmpeg_internals
-@@ -5932,6 +5954,7 @@ $def_libpostproc
+@@ -5932,6 +5952,7 @@ $def_libpostproc
  $def_libavresample
  $def_libnut
  
@@ -90,10 +90,10 @@ index 2aa1dc9..0c2b409 100755
  $def_qtx
 diff --git libmpdemux/demux_avx.c libmpdemux/demux_avx.c
 new file mode 100644
-index 0000000..1f09ed6
+index 0000000..97acf7b
 --- /dev/null
 +++ libmpdemux/demux_avx.c
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,411 @@
 +/*
 + * Demuxer for avxsynth
 + * Copyright (c) 2005 Gianluigi Tiesi <sherpya@netfarm.it>
@@ -337,7 +337,8 @@ index 0000000..1f09ed6
 +        sh_video->fps = (double) AVS->video_info->fps_numerator / (double) AVS->video_info->fps_denominator;
 +        sh_video->frametime = 1.0 / sh_video->fps;
 +
-+        sh_video->bih = malloc(sizeof(*sh_video->bih) + (256 * 4));
++        sh_video->bih->biSize = sizeof(*sh_video->bih) + (256 * 4);
++        sh_video->bih = malloc(sh_video->bih->biSize);
 +        sh_video->bih->biCompression = sh_video->format;
 +        sh_video->bih->biBitCount = avs_bits_per_pixel(AVS->video_info);
 +        //sh_video->bih->biPlanes = 2;
